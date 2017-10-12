@@ -1,8 +1,22 @@
-function G = basicset(SET, Bias)
+% SET.Cs = 30e-18;
+% SET.Cd = 30e-18;
+% SET.Cg = 0.1e-18;
+% SET.Gd = 1e-6;
+% SET.Gs = 1e-6;
+% SET.T = 0.3;
+% Bias.Vs = 0;
+% Bias.Vd = 0;
+% Bias.Vg = 0;
+function [G, vds, vgs] = basicset(SET, Bias)
     nvg = 101;
     vgs = linspace(-2000e-3,2000e-3,nvg);
     nvd = 101;
-    vds = linspace(-5e-3,5e-3,nvd);
+    % Do some math so that the start and end points after a numeric
+    % derivative become the desired start and end points
+    vds_min = -5e-3;
+    vds_max = -vds_min;
+    vds_step = (vds_max - vds_min)/(nvd-1);
+    vds = linspace(vds_min-vds_step/2,vds_max+vds_step/2,nvd+1);
     
     I = zeros(nvd,nvg);
     %tCount = zeros(nvd,nvg);
@@ -14,13 +28,13 @@ function G = basicset(SET, Bias)
         for ivd = 1:nvd
             Bias.Vd = vds(ivd);
             
-            Noptions = -5:5;
-            for Ninitial = -5:5
-                Nvalid = findTransitions(SET, Bias, Ninitial, Noptions);
-                checkReturnTransition = @(N) isValidTransition(SET, Bias, N, Ninitial);
+            %Noptions = -5:5;
+            %for Ninitial = -5:5
+                %Nvalid = findTransitions(SET, Bias, Ninitial, Noptions);
+                %checkReturnTransition = @(N) isValidTransition(SET, Bias, N, Ninitial);
                 %validCount = sum(arrayfun(checkReturnTransition,Nvalid));
                 %tCount(ivd,ivg) = tCount(ivd,ivg) + validCount;
-            end
+            %end
             I(ivd,ivg) = current(SET, Bias);
         end
     end
@@ -28,6 +42,7 @@ function G = basicset(SET, Bias)
     close(h);
     
     G = diff(I,1) ./ repmat(diff(vds)',1,nvg);
+    vds = linspace(vds_min, vds_max, nvd);
     %G = tCount./2;
 end
 
@@ -66,10 +81,13 @@ end
 % Equ 3.13
 function E = E_el(SET, Bias, N)
     e = 1.60217e-19;            % Coulombs
+    delta = 3.4e-4*e;           % Joules
+    delta = 1.8e-3*e;
     Ctotal = SET.Cs + SET.Cd + SET.Cg;
     Ec = e^2/(2*Ctotal);
     q = SET.Cs * Bias.Vs + SET.Cd * Bias.Vd + SET.Cg * Bias.Vg;
     E = Ec.*(N - q/e).^2;
+    %E = Ec.*(N - q/e).^2 + delta * mod(N,2);
 end
 
 function gamma = gamma_L(SET, Bias, N, dN)
@@ -77,8 +95,7 @@ function gamma = gamma_L(SET, Bias, N, dN)
     kT = 1.38065e-23 * SET.T;   % Joules
     
     if abs(dN) ~= 1
-        dir = sign(dN);
-        gamma = para([gamma_L(SET, Bias, N, dir) gamma_L(SET, Bias, N+dir, dN-dir)]);
+        gamma = 0;
         return;
     end
     
@@ -97,8 +114,7 @@ function gamma = gamma_R(SET, Bias, N, dN)
     kT = 1.38065e-23 * SET.T;   % Joules
     
     if abs(dN) ~= 1
-        dir = sign(dN);
-        gamma = para([gamma_L(SET, Bias, N, dir) gamma_L(SET, Bias, N+dir, dN-dir)]);
+        gamma = 0;
         return;
     end
     
@@ -110,10 +126,6 @@ function gamma = gamma_R(SET, Bias, N, dN)
         return;
     end
     gamma = SET.Gd./e.^2 .* dE ./ (exp(dE/kT) - 1);
-end
-
-function gamma = para(gammas)
-    gamma = 1/sum(1./gammas);
 end
 
 % Equ 3.20
