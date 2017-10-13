@@ -8,12 +8,12 @@
 % Bias.Vd = 0;
 % Bias.Vg = 0;
 function [G, vds, vgs] = basicset(SET, Bias)
-    nvg = 101;
-    vgs = linspace(-2000e-3,2000e-3,nvg);
-    nvd = 101;
+    nvg = 201;
+    vgs = linspace(-3000e-3,3000e-3,nvg);
+    nvd = 201;
     % Do some math so that the start and end points after a numeric
     % derivative become the desired start and end points
-    vds_min = -5e-3;
+    vds_min = -20e-3;
     vds_max = -vds_min;
     vds_step = (vds_max - vds_min)/(nvd-1);
     vds = linspace(vds_min-vds_step/2,vds_max+vds_step/2,nvd+1);
@@ -25,7 +25,7 @@ function [G, vds, vgs] = basicset(SET, Bias)
     for ivg = 1:nvg
         h = waitbar(ivg/nvg);
         Bias.Vg = vgs(ivg);
-        for ivd = 1:nvd
+        for ivd = 1:nvd+1
             Bias.Vd = vds(ivd);
             
             %Noptions = -5:5;
@@ -81,13 +81,11 @@ end
 % Equ 3.13
 function E = E_el(SET, Bias, N)
     e = 1.60217e-19;            % Coulombs
-    delta = 3.4e-4*e;           % Joules
-    delta = 1.8e-3*e;
     Ctotal = SET.Cs + SET.Cd + SET.Cg;
     Ec = e^2/(2*Ctotal);
     q = SET.Cs * Bias.Vs + SET.Cd * Bias.Vd + SET.Cg * Bias.Vg;
-    E = Ec.*(N - q/e).^2;
-    %E = Ec.*(N - q/e).^2 + delta * mod(N,2);
+    %E = Ec.*(N - q/e).^2;
+    E = Ec.*(N - q/e).^2 + SET.DeltaI * mod(N,2);
 end
 
 function gamma = gamma_L(SET, Bias, N, dN)
@@ -101,6 +99,12 @@ function gamma = gamma_L(SET, Bias, N, dN)
     
     % Based on Equ 3.14
     dE = E_el(SET, Bias, N+dN) - E_el(SET, Bias, N) + dN*e*Bias.Vs;
+    % Add Superconducting Delta
+    if dN > 1
+        dE = dE + 2*SET.DeltaI;
+    elseif dN < 1
+        dE = dE + 2*SET.DeltaL;
+    end
     
     if dE == 0
         gamma = SET.Gs./e.^2;
@@ -120,6 +124,12 @@ function gamma = gamma_R(SET, Bias, N, dN)
     
     % Based on Equ 3.14
     dE = E_el(SET, Bias, N+dN) - E_el(SET, Bias, N) + dN*e*Bias.Vd;
+    % Add Superconducting Delta
+    if dN > 1
+        dE = dE + 2*SET.DeltaI;
+    elseif dN < 1
+        dE = dE + 2*SET.DeltaL;
+    end
     
     if dE == 0
         gamma = SET.Gd./e.^2;
@@ -132,29 +142,24 @@ end
 function I = current(SET, Bias)
     e = 1.60217e-19;            % Coulombs
     
-    % These should be equal but for some reason, they are not.
-    gammaDiff = @(N) sum(gamma_L(SET, Bias, N, 1)) - sum(gamma_L(SET, Bias, N, -1));
+    % These should be equal, and it seems that they are
+    %gammaDiff = @(N) sum(gamma_L(SET, Bias, N, 1)) - sum(gamma_L(SET, Bias, N, -1));
     gammaDiff = @(N) sum(gamma_R(SET, Bias, N, -1)) - sum(gamma_R(SET, Bias, N, 1));
     
     gamma = @(N, dN) gamma_L(SET, Bias, N, dN) + gamma_R(SET, Bias, N, dN);
     
     % Adapted from Equ 3.46
-    %gammaMat = [0            gamma(-1, -1)  gamma(0,-2)  gamma(1,-3)  gamma(2,-4);
-    %            gamma(-2,1)  0              gamma(0,-1)  gamma(1,-2)  gamma(2,-3);
-    %            gamma(-2,2)  gamma(-1,1)    0            gamma(1,-1)  gamma(2,-2);
-    %            gamma(-2,3)  gamma(-1,2)    gamma(0,1)   0            gamma(2,-1);
-    %            gamma(-2,4)  gamma(-1,3)    gamma(0,2)   gamma(1,1)   0];
-    gammaMat = [0            gamma(-1, -1)  0            0            0;
-                gamma(-2,1)  0              gamma(0,-1)  0            0;
-                0            gamma(-1,1)    0            gamma(1,-1)  0;
-                0            0              gamma(0,1)   0            gamma(2,-1);
-                0            0              0            gamma(1,1)   0];
-    %gammaMat = [0            gamma(0,-1)  gamma(1,-2);
-    %            gamma(-1,1)  0            gamma(1,-1);
-    %            gamma(-1,2)  gamma(0,1)   0];
-    %gammaMat = [0            gamma(0,-1)  0;
-    %            gamma(-1,1)  0            gamma(1,-1);
-    %            0            gamma(0, 1)  0];
+    %gammaMat = [0            gamma(-1, -1)  0            0            0;
+    %            gamma(-2,1)  0              gamma(0,-1)  0            0;
+    %            0            gamma(-1,1)    0            gamma(1,-1)  0;
+    %            0            0              gamma(0,1)   0            gamma(2,-1);
+    %            0            0              0            gamma(1,1)   0];
+    ns = -5:5;
+    gammaPlus = @(N) gamma(N, 1);
+    gammaMinus = @(N) gamma(N, -1);
+    gammaMat = zeros(length(ns));
+    gammaMat = gammaMat + diag(arrayfun(gammaPlus, ns(1:end-1)), -1);
+    gammaMat = gammaMat + diag(arrayfun(gammaMinus, ns(2:end)), 1);
     gammaMat = gammaMat - diag(sum(gammaMat,1));
     % Equ 3.22
     [V,D] = eig(gammaMat);
@@ -163,17 +168,5 @@ function I = current(SET, Bias)
     pns = V(:,index);
     pns = pns/sum(pns);
     
-    ns = [-2, -1, 0, 1, 2];
-    %ns = [-1, 0, 1];
     I = e * sum(arrayfun(gammaDiff, ns)'.*pns);
-end
-
-function out = gtzero(in)
-    in(in<=0) = [];
-    out = in;
-end
-
-function out = ltzero(in)
-    in(in>=0) = [];
-    out = in;
 end
